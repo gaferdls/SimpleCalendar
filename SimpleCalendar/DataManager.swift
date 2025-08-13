@@ -9,12 +9,15 @@ import Foundation
 
 struct GoalData: Codable {
     var goalsByDate: [String: [DayEntry]]
+    var brainDump: [DayEntry]
+    var todaysFocus: [DayEntry]
 }
 
 struct DayEntry: Identifiable, Codable, Equatable {
     var id = UUID()
     var text: String
     var isPriority: Bool = false
+    var startTime: Date?
 }
 
 class DataManager{
@@ -30,11 +33,13 @@ class DataManager{
         return documentDirectory?.appendingPathComponent(fileName)
     }
     
-    func save(goalsByDate: [String: [DayEntry]]){
+    func save(goalsByDate: [String: [DayEntry]], brainDump: [DayEntry], todaysFocus: [DayEntry]){
         guard let url = fileURL else { return }
         let cleanedGoalsByDate = goalsByDate.mapValues {entries in
             entries.filter{!$0.text.isEmpty}}
-        let dataToSave = GoalData(goalsByDate: cleanedGoalsByDate)
+        let cleanedBrainDump = brainDump.filter{!$0.text.isEmpty}
+        let cleanedTodaysFocus = todaysFocus.filter{!$0.text.isEmpty}
+        let dataToSave = GoalData(goalsByDate: cleanedGoalsByDate, brainDump: cleanedBrainDump, todaysFocus: cleanedTodaysFocus)
         let encoder = JSONEncoder()
         do{
             let data = try encoder.encode(dataToSave)
@@ -45,20 +50,20 @@ class DataManager{
         }
     }
     
-    func load() -> [String: [DayEntry]]{
+    func load() -> GoalData{
         guard let url = fileURL,
               let data = try? Data(contentsOf: url) else{
-            return [:]
+            return GoalData(goalsByDate: [:], brainDump: [], todaysFocus: [])
         }
         
         let decoder = JSONDecoder()
         do{
             let decodeData = try decoder.decode(GoalData.self, from: data)
             print("Goals loaded sucessfully")
-            return decodeData.goalsByDate
+            return decodeData
         } catch{
             print("Error loading goals: \(error.localizedDescription)")
-            return [:]
+            return GoalData(goalsByDate: [:], brainDump: [], todaysFocus: [])
         }
     }
 }

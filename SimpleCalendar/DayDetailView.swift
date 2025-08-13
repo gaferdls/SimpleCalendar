@@ -174,14 +174,14 @@ struct DayDetailView: View {
     }
     
     private func loadGoals(){
-        let allGoals = DataManager.shared.load()
-        self.goals = allGoals[dateKey] ?? []
+        let loadedData = DataManager.shared.load()
+        self.goals = loadedData.goalsByDate[dateKey] ?? []
     }
     
     private func saveGoals(){
-        var allGoals = DataManager.shared.load()
-        allGoals[dateKey] = self.goals
-        DataManager.shared.save(goalsByDate: allGoals)
+        var loadedData = DataManager.shared.load()
+        loadedData.goalsByDate[dateKey] = self.goals
+        DataManager.shared.save(goalsByDate: loadedData.goalsByDate, brainDump: loadedData.brainDump, todaysFocus: loadedData.todaysFocus)
         onGoalsUpdated()
     }
     
