@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AVFoundation
 
 struct ContentView: View {
     @State private var currentDate = Date()
@@ -15,6 +16,8 @@ struct ContentView: View {
     @State private var newBrainDumpTask: String = ""
     @State private var todaysFocusTasks: [DayEntry] = []
     @State private var selectedTaskForTime: DayEntry?
+    @State private var activeTask: DayEntry?
+    @State private var justCompletedTask: DayEntry?
     
     private var calendar: Calendar{
         Calendar.current
@@ -88,146 +91,133 @@ struct ContentView: View {
                                                     Circle()
                                                         .fill(Color.clear)
                                                         .frame(width: 6, height: 6)
-                                                    }
                                                 }
-                                                .frame(maxWidth: .infinity)
                                             }
-                                            .buttonStyle(.plain)
-                                            .tint(.blue)
+                                            .frame(maxWidth: .infinity)
                                         }
+                                        .buttonStyle(.plain)
+                                        .tint(.blue)
                                     }
                                 }
                             }
                         }
-                        .padding(.horizontal)
                     }
-                    .padding(.vertical)
-                    
-                    // MARK: Bottom Section - Today's Focus & Brain Dump
-                    List {
-                        Section(header: Text("Today's Focus").font(.title2).fontWeight(.bold).padding(.leading, -16)) {
-                            ForEach(todaysFocusTasks) { task in
-                                VStack(alignment: .leading, spacing: 10) {
-                                    HStack {
-                                        if let time = task.startTime {
-                                            Text(time, style: .time)
-                                                .font(.footnote)
-                                                .foregroundColor(.secondary)
-                                                .frame(width: 60, alignment: .leading)
-                                        } else {
-                                            Text("No Time")
-                                                .font(.footnote)
-                                                .foregroundColor(.secondary)
-                                                .frame(width: 60, alignment: .leading)
-                                        }
-                                        Text(task.text)
-                                        Spacer()
-                                    }
-                                    .contentShape(Rectangle()) // Make the whole row tappable
-                                    .onTapGesture {
-                                        // Toggle the DatePicker for this task
-                                        selectedTaskForTime = (selectedTaskForTime?.id == task.id) ? nil : task
-                                    }
-                                    
-                                    // The DatePicker will only appear if its task is the one selected.
-                                    if selectedTaskForTime?.id == task.id {
-                                        DatePicker("", selection: Binding(
-                                            get: { selectedTaskForTime?.startTime ?? Date() },
-                                            set: { newDate in
-                                                updateTaskTime(for: task, newDate: newDate)
-                                            }
-                                        ), displayedComponents: .hourAndMinute)
-                                        .labelsHidden()
-                                        .datePickerStyle(.wheel)
-                                    }
-                                }
-                            }
-                            .onDelete(perform: deleteTodaysFocusTask)
+                    .padding(.horizontal)
+                }
+                .padding(.vertical)
+                
+                // MARK: Bottom Section - Today's Focus & Brain Dump
+                List {
+                    Section(header: Text("Today's Focus").font(.title2).fontWeight(.bold).padding(.leading, -16)) {
+                        ForEach(todaysFocusTasks) { task in
+                            TodayTaskRow(task: task, onComplete: { completedTask in
+                                completeTask(completedTask)
+                            }, onSelectTime: { selectedTask in
+                                selectedTaskForTime = (selectedTaskForTime?.id == selectedTask.id) ? nil : selectedTask
+                            }, onLongPress: { pressedTask in
+                                activeTask = pressedTask
+                            })
                         }
-                        
-                        Section(header: Text("Brain Dump").font(.title2).fontWeight(.bold).padding(.leading, -16)) {
-                            HStack {
-                                TextField("Quick-add a thought...", text: $newBrainDumpTask)
-                                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                                
-                                Button(action: {
-                                    if !newBrainDumpTask.isEmpty {
-                                        let newEntry = DayEntry(text: newBrainDumpTask)
-                                        brainDumpTasks.append(newEntry)
-                                        newBrainDumpTask = ""
-                                        saveAllData()
-                                    }
-                                }) {
-                                    Text("Add")
-                                        .padding(.horizontal)
-                                        .padding(.vertical, 8)
-                                        .background(Color.blue)
-                                        .foregroundColor(.white)
-                                        .cornerRadius(8)
-                                }
-                            }
+                        .onDelete(perform: deleteTodaysFocusTask)
+                    }
+                    
+                    Section(header: Text("Brain Dump").font(.title2).fontWeight(.bold).padding(.leading, -16)) {
+                        HStack {
+                            TextField("Quick-add a thought...", text: $newBrainDumpTask)
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
                             
-                            ForEach(brainDumpTasks) { task in
-                                HStack {
-                                    Text(task.text)
-                                    Spacer()
-                                    Button(action: {
-                                        moveTaskToToday(task: task)
-                                    }) {
-                                        Image(systemName: "arrow.right.circle.fill")
-                                            .foregroundColor(.green)
-                                    }
+                            Button(action: {
+                                if !newBrainDumpTask.isEmpty {
+                                    let newEntry = DayEntry(text: newBrainDumpTask)
+                                    brainDumpTasks.append(newEntry)
+                                    newBrainDumpTask = ""
+                                    saveAllData()
+                                }
+                            }) {
+                                Text("Add")
+                                    .padding(.horizontal)
+                                    .padding(.vertical, 8)
+                                    .background(Color.blue)
+                                    .foregroundColor(.white)
+                                    .cornerRadius(8)
+                            }
+                        }
+                        
+                        ForEach(brainDumpTasks) { task in
+                            HStack {
+                                Text(task.text)
+                                Spacer()
+                                Button(action: {
+                                    moveTaskToToday(task: task)
+                                }) {
+                                    Image(systemName: "arrow.right.circle.fill")
+                                        .foregroundColor(.green)
                                 }
                             }
-                            .onDelete(perform: deleteBrainDumpTask)
                         }
+                        .onDelete(perform: deleteBrainDumpTask)
                     }
-                    .listStyle(.insetGrouped)
+                }
+                .listStyle(.insetGrouped)
+                
+            }
+            .onAppear {
+                let loadedData = DataManager.shared.load()
+                self.allGoals = loadedData.goalsByDate
+                self.brainDumpTasks = loadedData.brainDump
+                self.todaysFocusTasks = loadedData.todaysFocus
+            }
+            .navigationDestination(for: Int.self) { day in
+                DayDetailView(selectedDay: day, onGoalsUpdated: {
+                    self.allGoals = DataManager.shared.load().goalsByDate
+                    print("Goals were updated! Reloading the calendar.")
+                })
+            }
+            .navigationTitle("Calendar")
+            .popover(item: $selectedTaskForTime) { task in
+                VStack {
+                    Text("Set a time for: \(task.text)")
+                        .font(.headline)
+                        .padding()
                     
-                }
-                .onAppear {
-                    let loadedData = DataManager.shared.load()
-                    self.allGoals = loadedData.goalsByDate
-                    self.brainDumpTasks = loadedData.brainDump
-                    self.todaysFocusTasks = loadedData.todaysFocus
-                }
-                .navigationDestination(for: Int.self) { day in
-                    DayDetailView(selectedDay: day, onGoalsUpdated: {
-                        self.allGoals = DataManager.shared.load().goalsByDate
-                        print("Goals were updated! Reloading the calendar.")
-                    })
-                }
-                .navigationTitle("Calendar")
-                .popover(item: $selectedTaskForTime) { task in
-                    VStack {
-                        Text("Set a time for: \(task.text)")
-                            .font(.headline)
-                            .padding()
-                        
-                        DatePicker("", selection: Binding(
-                            get: { selectedTaskForTime?.startTime ?? Date() },
-                            set: { newDate in
-                                updateTaskTime(for: task, newDate: newDate)
-                                if let index = todaysFocusTasks.firstIndex(where: { $0.id == task.id }) {
-                                    selectedTaskForTime = todaysFocusTasks[index]
-                                }
+                    DatePicker("", selection: Binding(
+                        get: { selectedTaskForTime?.startTime ?? Date() },
+                        set: { newDate in
+                            updateTaskTime(for: task, newDate: newDate)
+                            if let index = todaysFocusTasks.firstIndex(where: { $0.id == task.id }) {
+                                selectedTaskForTime = todaysFocusTasks[index]
                             }
-                        ), displayedComponents: .hourAndMinute)
-                        .labelsHidden()
-                        .datePickerStyle(.wheel)
-                        .padding()
-                        
-                        Button("Done") {
-                            selectedTaskForTime = nil
                         }
-                        .padding()
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(10)
+                    ), displayedComponents: .hourAndMinute)
+                    .labelsHidden()
+                    .datePickerStyle(.wheel)
+                    .padding()
+                    
+                    Button("Done") {
+                        selectedTaskForTime = nil
                     }
+                    .padding()
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(10)
                 }
             }
         }
+        .overlay(
+            TimerOverlay(activeTask: $activeTask)
+        )
+        .overlay(CelebrationView(trigger: $justCompletedTask))
+        .sensoryFeedback(.success, trigger: justCompletedTask)
+        .animation(.easeInOut, value: activeTask)
+    }
+    
+    private func completeTask(_ task: DayEntry){
+        justCompletedTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            todaysFocusTasks.removeAll { $0.id == task.id }
+            saveAllData()
+        }
+    }
     
     func isToday(day: Int) -> Bool{
         let components = calendar.dateComponents([.year, .month, .day], from: Date())
@@ -282,6 +272,86 @@ struct ContentView: View {
     }
 }
 
+struct TodayTaskRow: View {
+    let task: DayEntry
+    var onComplete: (DayEntry) -> Void
+    var onSelectTime: (DayEntry) -> Void
+    var onLongPress: (DayEntry) -> Void
+    var body: some View {
+        HStack(spacing: 15) {
+            Button(action: { onComplete(task) }) {
+                Image(systemName: "circle")
+                    .font(.title2)
+                    .foregroundColor(.blue)
+            }
+            .buttonStyle(.plain)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                if let time = task.startTime {
+                    Text(time, style: .time)
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+                Text(task.text)
+            }
+            
+            Spacer()
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { onSelectTime(task) }
+        .onLongPressGesture { onLongPress(task) }
+    }
+}
+
+private struct TimerOverlay: View {
+    @Binding var activeTask: DayEntry?
+
+    var body: some View {
+        if let task = activeTask {
+            ZStack {
+                Color.black.opacity(0.4)
+                    .edgesIgnoringSafeArea(.all)
+                    .onTapGesture {
+                        activeTask = nil
+                    }
+
+                PomodoroTimerView(activeTask: task) {
+                    activeTask = nil
+                }
+            }
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+}
+
+struct CelebrationView: View{
+    @Binding var trigger: DayEntry?
+    @State private var isAnimating = false
+    
+    var body: some View{
+        ZStack{
+            if isAnimating{
+                ForEach(0..<20){ _ in
+                    Circle()
+                        .fill(Color.blue)
+                        .frame(width: .random(in: 5...15), height: .random(in: 5...15))
+                        .position(x: .random(in: 0...UIScreen.main.bounds.width), y: .random(in: 0...UIScreen.main.bounds.height))
+                        .opacity(isAnimating ? 0 : 1)
+                        .scaleEffect(isAnimating ? 1.5 : 0.1)
+                        .animation(.easeOut(duration: 0.7).delay(.random(in: 0...0.2)), value: isAnimating)
+                }
+            }
+        }
+        .onChange(of: trigger) { oldValue, newValue in
+            guard newValue != nil else { return }
+            isAnimating = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                isAnimating = false
+                trigger = nil
+            }
+        }
+    }
+}
 
 struct ContentView_Previews: PreviewProvider {
     static var previews: some View{
