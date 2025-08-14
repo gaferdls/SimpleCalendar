@@ -35,12 +35,14 @@ class DataManager{
     
     func save(goalsByDate: [String: [DayEntry]], brainDump: [DayEntry], todaysFocus: [DayEntry]){
         guard let url = fileURL else { return }
-        let cleanedGoalsByDate = goalsByDate.mapValues {entries in
-            entries.filter{!$0.text.isEmpty}}
+        let cleanedGoalsByDate = goalsByDate.mapValues { entries in
+            entries.filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
+        }
         let cleanedBrainDump = brainDump.filter{!$0.text.isEmpty}
         let cleanedTodaysFocus = todaysFocus.filter{!$0.text.isEmpty}
         let dataToSave = GoalData(goalsByDate: cleanedGoalsByDate, brainDump: cleanedBrainDump, todaysFocus: cleanedTodaysFocus)
         let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
         do{
             let data = try encoder.encode(dataToSave)
             try data.write(to: url)
@@ -57,6 +59,8 @@ class DataManager{
         }
         
         let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        
         do{
             let decodeData = try decoder.decode(GoalData.self, from: data)
             print("Goals loaded sucessfully")
@@ -67,3 +71,4 @@ class DataManager{
         }
     }
 }
+
