@@ -9,9 +9,13 @@ import SwiftUI
 
 @main
 struct SimpleCalendarApp: App {
+    
+    @StateObject private var viewModel = AppViewModel()
+    
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            MainTabView()
+                .environmentObject(viewModel)
         }
     }
 }

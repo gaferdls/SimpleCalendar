@@ -25,6 +25,7 @@ struct DayEntry: Identifiable, Codable, Equatable {
     var text: String
     var isPriority: Bool = false
     var startTime: Date?
+    var isCompleted: Bool = false
 }
 
 class DataManager{
