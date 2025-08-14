@@ -16,20 +16,24 @@ class APIKeyManager {
         guard let url = Bundle.main.url(forResource: "Secrets", withExtension: "plist"),
               let data = try? Data(contentsOf: url),
               let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else {
+            print("ERROR: Secrets.plist not found or could not be loaded. Please create one and add your 'GeminiAPIKey'.")
             return ""
         }
         return plist["GeminiAPIKey"] as? String ?? ""
     }
 }
-
+    
 struct DayDetailView: View {
     let selectedDay : Int
     var onGoalsUpdated: () -> Void
     
+    // State for thje view
     @State private var newGoal = ""
     @State private var goals: [DayEntry] = []
     @State private var selectedType: String = "Goal"
     @State private var isGeneratingTask: Bool = false
+    
+    // State for error handling
     @State private var showingErrorAlert = false
     @State private var errorMessage = ""
     
@@ -140,15 +144,17 @@ struct DayDetailView: View {
         }
     }
     
+    // Functions
+    
     func addGoal() {
-            if !newGoal.isEmpty{
-                let emoji = selectedType == "Goal" ? "🎯" : "⏰"
-                let newEntry = DayEntry(text: emoji + " " + newGoal, isPriority: false)
-                goals.append(newEntry)
-                newGoal = ""
-                saveGoals()
-            }
+        if !newGoal.isEmpty{
+            let emoji = selectedType == "Goal" ? "🎯" : "⏰"
+            let newEntry = DayEntry(text: emoji + " " + newGoal, isPriority: false)
+            goals.append(newEntry)
+            newGoal = ""
+            saveGoals()
         }
+    }
     
     func generateSubtasks() async {
         isGeneratingTask = true
@@ -220,15 +226,24 @@ struct DayDetailView: View {
         }
     }
     
+    // Data Parsistence
+    
     private func loadGoals(){
         let loadedData = DataManager.shared.load()
         self.goals = loadedData.goalsByDate[dateKey] ?? []
     }
     
     private func saveGoals(){
-        var loadedData = DataManager.shared.load()
-        loadedData.goalsByDate[dateKey] = self.goals
-        DataManager.shared.save(goalsByDate: loadedData.goalsByDate, brainDump: loadedData.brainDump, todaysFocus: loadedData.todaysFocus)
+        var allData = DataManager.shared.load()
+        allData.goalsByDate[dateKey] = self.goals
+        
+        DataManager.shared.save(
+            goalsByDate: allData.goalsByDate,
+            brainDump: allData.brainDump,
+            todaysFocus: allData.todaysFocus,
+            totalTasksCompleted: allData.totalTasksCompleted,
+            streakData: allData.streakData
+        )
         onGoalsUpdated()
     }
     
@@ -245,7 +260,7 @@ struct DayDetailView: View {
     }
     
 }
-
+    
 struct DayDetailView_Previews: PreviewProvider {
     static var previews: some View {
         NavigationStack {
@@ -253,3 +268,4 @@ struct DayDetailView_Previews: PreviewProvider {
         }
     }
 }
+

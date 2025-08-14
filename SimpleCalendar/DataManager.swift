@@ -7,10 +7,17 @@
 
 import Foundation
 
+struct StreakData: Codable {
+    var currentStreak: Int = 0
+    var lastCompletionDate: Date?
+}
+
 struct GoalData: Codable {
     var goalsByDate: [String: [DayEntry]]
     var brainDump: [DayEntry]
     var todaysFocus: [DayEntry]
+    var totalTasksCompleted: Int = 0
+    var streakData: StreakData = StreakData()
 }
 
 struct DayEntry: Identifiable, Codable, Equatable {
@@ -33,16 +40,25 @@ class DataManager{
         return documentDirectory?.appendingPathComponent(fileName)
     }
     
-    func save(goalsByDate: [String: [DayEntry]], brainDump: [DayEntry], todaysFocus: [DayEntry]){
+    func save(goalsByDate: [String: [DayEntry]], brainDump: [DayEntry], todaysFocus: [DayEntry], totalTasksCompleted: Int, streakData: StreakData){
         guard let url = fileURL else { return }
         let cleanedGoalsByDate = goalsByDate.mapValues { entries in
             entries.filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
         }
         let cleanedBrainDump = brainDump.filter{!$0.text.isEmpty}
         let cleanedTodaysFocus = todaysFocus.filter{!$0.text.isEmpty}
-        let dataToSave = GoalData(goalsByDate: cleanedGoalsByDate, brainDump: cleanedBrainDump, todaysFocus: cleanedTodaysFocus)
+        
+        let dataToSave = GoalData(
+            goalsByDate: cleanedGoalsByDate,
+            brainDump: cleanedBrainDump,
+            todaysFocus: cleanedTodaysFocus,
+            totalTasksCompleted: totalTasksCompleted,
+            streakData: streakData
+        )
+        
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
+        
         do{
             let data = try encoder.encode(dataToSave)
             try data.write(to: url)

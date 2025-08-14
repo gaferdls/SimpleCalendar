@@ -15,9 +15,13 @@ struct ContentView: View {
     @State private var brainDumpTasks: [DayEntry] = []
     @State private var newBrainDumpTask: String = ""
     @State private var todaysFocusTasks: [DayEntry] = []
+    
+    //UI Interaction State
     @State private var selectedTaskForTime: DayEntry?
     @State private var activeTask: DayEntry?
     @State private var justCompletedTask: DayEntry?
+    @State private var totalTasksCompleted: Int = 0
+    @State private var streakData = StreakData()
     
     private var calendar: Calendar{
         Calendar.current
@@ -40,7 +44,11 @@ struct ContentView: View {
     
     var body: some View {
         NavigationStack{
-            VStack { // This is the main VStack for the entire screen
+            VStack {
+                StatsView(totalCompleted: totalTasksCompleted, currentStreak: streakData.currentStreak)
+                                    .padding(.bottom)
+                
+                // MARK: Calendar Grid
                 VStack(alignment: .leading) {
                     Text(headerText(for: currentDate))
                         .font(.title)
@@ -106,7 +114,6 @@ struct ContentView: View {
                 }
                 .padding(.vertical)
                 
-                // MARK: Bottom Section - Today's Focus & Brain Dump
                 List {
                     Section(header: Text("Today's Focus").font(.title2).fontWeight(.bold).padding(.leading, -16)) {
                         ForEach(todaysFocusTasks) { task in
@@ -159,18 +166,20 @@ struct ContentView: View {
                     }
                 }
                 .listStyle(.insetGrouped)
-                
             }
             .onAppear {
                 let loadedData = DataManager.shared.load()
                 self.allGoals = loadedData.goalsByDate
                 self.brainDumpTasks = loadedData.brainDump
                 self.todaysFocusTasks = loadedData.todaysFocus
+                self.totalTasksCompleted = loadedData.totalTasksCompleted
+                self.streakData = loadedData.streakData
+                
+                updateStreakOnLoad()
             }
             .navigationDestination(for: Int.self) { day in
                 DayDetailView(selectedDay: day, onGoalsUpdated: {
                     self.allGoals = DataManager.shared.load().goalsByDate
-                    print("Goals were updated! Reloading the calendar.")
                 })
             }
             .navigationTitle("Calendar")
@@ -206,15 +215,43 @@ struct ContentView: View {
         .overlay(
             TimerOverlay(activeTask: $activeTask)
         )
-        .overlay(CelebrationView(trigger: $justCompletedTask))
+        .overlay(
+            CelebrationView(trigger: $justCompletedTask)
+                .ignoresSafeArea()
+        )
         .sensoryFeedback(.success, trigger: justCompletedTask)
         .animation(.easeInOut, value: activeTask)
     }
     
     private func completeTask(_ task: DayEntry){
         justCompletedTask = task
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+        totalTasksCompleted += 1
+        updateStreak()
+        saveAllData()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             todaysFocusTasks.removeAll { $0.id == task.id }
+            saveAllData()
+        }
+    }
+    
+    private func updateStreak(){
+        guard let lastDate = streakData.lastCompletionDate else{
+            streakData.currentStreak = 1
+            streakData.lastCompletionDate = Date()
+            return
+        }
+        if !calendar.isDateInToday(lastDate){
+            streakData.currentStreak += 1
+        } else {
+            streakData.currentStreak = 1
+        }
+        streakData.lastCompletionDate = Date()
+    }
+    
+    private func updateStreakOnLoad(){
+        guard let lastDate = streakData.lastCompletionDate else { return }
+        if !calendar.isDateInToday(lastDate) && !calendar.isDateInYesterday(lastDate){
+            streakData.currentStreak = 0
             saveAllData()
         }
     }
@@ -242,7 +279,13 @@ struct ContentView: View {
     }
     
     private func saveAllData() {
-        DataManager.shared.save(goalsByDate: allGoals, brainDump: brainDumpTasks, todaysFocus: todaysFocusTasks)
+        DataManager.shared.save(
+            goalsByDate: allGoals,
+            brainDump: brainDumpTasks,
+            todaysFocus: todaysFocusTasks,
+            totalTasksCompleted: totalTasksCompleted,
+            streakData: streakData
+        )
     }
     
     private func deleteBrainDumpTask(at offsets: IndexSet) {
@@ -264,11 +307,38 @@ struct ContentView: View {
     }
     
     private func updateTaskTime(for task: DayEntry, newDate: Date){
-        if let index = todaysFocusTasks.firstIndex(where: { $0.id == task.id}){
+        if let index = todaysFocusTasks.firstIndex(where: { $0.id == task.id }){
             todaysFocusTasks[index].startTime = newDate
-            todaysFocusTasks.sort { $0.startTime ?? Date() < $1.startTime ?? Date() }
+            todaysFocusTasks.sort { ($0.startTime ?? .distantFuture) < ($1.startTime ?? .distantFuture) }
             saveAllData()
         }
+    }
+}
+
+struct StatsView: View {
+    let totalCompleted: Int
+    let currentStreak: Int
+    var body: some View {
+        HStack {
+            Spacer()
+            VStack {
+                Text("\(totalCompleted)")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Text("Completed")
+                    .font(.caption)
+            }
+            Spacer()
+            VStack {
+                Text("\(currentStreak)")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Text("Day Streak 🔥")
+                    .font(.caption)
+            }
+            Spacer()
+        }
+        .padding(.horizontal)
     }
 }
 
@@ -277,6 +347,7 @@ struct TodayTaskRow: View {
     var onComplete: (DayEntry) -> Void
     var onSelectTime: (DayEntry) -> Void
     var onLongPress: (DayEntry) -> Void
+    
     var body: some View {
         HStack(spacing: 15) {
             Button(action: { onComplete(task) }) {
@@ -324,32 +395,64 @@ private struct TimerOverlay: View {
     }
 }
 
-struct CelebrationView: View{
+struct CelebrationView: View {
     @Binding var trigger: DayEntry?
     @State private var isAnimating = false
-    
-    var body: some View{
-        ZStack{
-            if isAnimating{
-                ForEach(0..<20){ _ in
-                    Circle()
-                        .fill(Color.blue)
-                        .frame(width: .random(in: 5...15), height: .random(in: 5...15))
-                        .position(x: .random(in: 0...UIScreen.main.bounds.width), y: .random(in: 0...UIScreen.main.bounds.height))
-                        .opacity(isAnimating ? 0 : 1)
-                        .scaleEffect(isAnimating ? 1.5 : 0.1)
-                        .animation(.easeOut(duration: 0.7).delay(.random(in: 0...0.2)), value: isAnimating)
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                if isAnimating {
+                    ForEach(0..<100) { _ in
+                        ParticleView(size: geometry.size)
+                    }
                 }
             }
         }
         .onChange(of: trigger) { oldValue, newValue in
             guard newValue != nil else { return }
             isAnimating = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 isAnimating = false
                 trigger = nil
             }
         }
+    }
+}
+
+// A new view for each individual particle to make the animation logic cleaner
+struct ParticleView: View {
+    let size: CGSize
+    @State private var isAnimating = false
+    
+    private let colors: [Color] = [.blue, .green, .red, .orange, .purple, .yellow]
+    private let startX: CGFloat
+    private let startY: CGFloat
+    private let endY: CGFloat
+    private let scale: CGFloat
+    private let duration: Double
+    private let delay: Double
+
+    init(size: CGSize) {
+        self.size = size
+        self.startX = .random(in: 0...size.width)
+        self.startY = size.height + 50
+        self.endY = .random(in: -50...size.height/2)
+        self.scale = .random(in: 0.5...1.5)
+        self.duration = .random(in: 0.8...1.5)
+        self.delay = .random(in: 0...0.3)
+    }
+
+    var body: some View {
+        Circle()
+            .fill(colors.randomElement()!)
+            .frame(width: 15, height: 15)
+            .scaleEffect(isAnimating ? scale : 0)
+            .position(x: startX, y: isAnimating ? endY : startY)
+            .animation(.easeOut(duration: duration).delay(delay), value: isAnimating)
+            .onAppear {
+                isAnimating = true
+            }
     }
 }
 
