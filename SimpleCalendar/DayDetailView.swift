@@ -7,6 +7,21 @@
 
 import SwiftUI
 
+fileprivate struct AIResponse: Decodable {
+    let subtasks: [String]
+}
+
+class APIKeyManager {
+    static var geminiAPIKey: String {
+        guard let url = Bundle.main.url(forResource: "Secrets", withExtension: "plist"),
+              let data = try? Data(contentsOf: url),
+              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else {
+            return ""
+        }
+        return plist["GeminiAPIKey"] as? String ?? ""
+    }
+}
+
 struct DayDetailView: View {
     let selectedDay : Int
     var onGoalsUpdated: () -> Void
@@ -15,6 +30,8 @@ struct DayDetailView: View {
     @State private var goals: [DayEntry] = []
     @State private var selectedType: String = "Goal"
     @State private var isGeneratingTask: Bool = false
+    @State private var showingErrorAlert = false
+    @State private var errorMessage = ""
     
     private let types = ["Goal", "Reminder"]
     
@@ -44,9 +61,10 @@ struct DayDetailView: View {
             .padding(.horizontal)
             
             HStack{
-                TextField("Add a new goal ...", text: $newGoal)
+                TextField("Add a new goal...", text: $newGoal)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
                 
+                // The "Decompose" button appears for longer tasks
                 if newGoal.count > 10 {
                     Button(action:{
                         Task{
@@ -63,13 +81,7 @@ struct DayDetailView: View {
                     .disabled(isGeneratingTask)
                 }else{
                     Button(action:{
-                        if !newGoal.isEmpty{
-                            let emoji = selectedType == "Goal" ? "🎯" : "⏰"
-                            let newEntry = DayEntry(text: emoji + newGoal, isPriority: false)
-                            goals.append(newEntry)
-                            newGoal = ""
-                            saveGoals()
-                        }
+                        addGoal()
                     }){
                         Text("Add")
                             .padding(.horizontal)
@@ -83,12 +95,11 @@ struct DayDetailView: View {
             .padding()
             
             if isGeneratingTask{
-                ProgressView()
+                ProgressView("Braking it down...")
                     .padding()
             }
-            
             if !goals.isEmpty{
-                Text("Goals for Day \(selectedDay)")
+                Text("Tasks for Day \(selectedDay)")
                     .font(.headline)
                     .padding(.horizontal)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -122,55 +133,91 @@ struct DayDetailView: View {
                 EditButton()
             }
         }
+        .alert("Error", isPresented: $showingErrorAlert){
+            Button("OK"){}
+        } message: {
+            Text(errorMessage)
+        }
     }
     
-    func generateSubtasks() async{
+    func addGoal() {
+            if !newGoal.isEmpty{
+                let emoji = selectedType == "Goal" ? "🎯" : "⏰"
+                let newEntry = DayEntry(text: emoji + " " + newGoal, isPriority: false)
+                goals.append(newEntry)
+                newGoal = ""
+                saveGoals()
+            }
+        }
+    
+    func generateSubtasks() async {
         isGeneratingTask = true
-        let apiKey = "" // API key is provided by the system.
+        
+        let apiKey = APIKeyManager.geminiAPIKey
+        guard !apiKey.isEmpty else {
+            handleError(message: "API Key is missing. Please add it to Secrets.plist.")
+            return
+        }
+        
         let prompt = """
-                    Break down the following large task into 3 to 5 smaller, actionable sub-tasks.
-                    Provide the sub-tasks as a bulleted list.
-                    Task: \(newGoal)
-                    """
+            Break down the following large task into 3 to 5 smaller, actionable sub-tasks.
+            Task: "\(newGoal)"
+            Provide the response as a JSON object with a single key "subtasks" which contains an array of strings.
+            Example: {"subtasks": ["First sub-task", "Second sub-task"]}
+            """
         
+        let urlString = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=\(apiKey)"
+        guard let url = URL(string: urlString) else {
+            handleError(message: "Invalid API URL.")
+            return
+        }
         
-        let chatHistory: [[String: Any]] = [["role": "user", "parts": [["text": prompt]]]]
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let requestBody: [String: Any] = ["contents": [["parts": [["text": prompt]]]]]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: requestBody)
         
-        
-        let payload = ["contents": chatHistory]
-        let apiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=\(apiKey)"
-        do{
-            let (data, _) = try await URLSession.shared.data(for: URLRequest(url: URL(string: apiUrl)!))
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
             
+            // Parse the top-level Gemini response
             if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
-                           let candidates = json["candidates"] as? [[String: Any]],
-                           let content = candidates.first?["content"] as? [String: Any],
-                           let parts = content["parts"] as? [[String: Any]],
+               let candidates = json["candidates"] as? [[String: Any]],
+               let content = candidates.first?["content"] as? [String: Any],
+               let parts = content["parts"] as? [[String: Any]],
                let text = parts.first?["text"] as? String {
                 
-                // Parse the bulleted list into individual tasks.
-                let newTasks = text.split(separator: "\n").compactMap { subtask in
-                    let trimmedTask = subtask.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "• ", with: "")
-                    return trimmedTask.isEmpty ? nil : DayEntry(text: "📝 " + trimmedTask)
+                // Decode the JSON string from the "text" field
+                if let jsonData = text.data(using: .utf8) {
+                    let decodedResponse = try JSONDecoder().decode(AIResponse.self, from: jsonData)
+                    let newTasks = decodedResponse.subtasks.map { DayEntry(text: "📝 " + $0) }
+                    
+                    // Update UI on the main thread
+                    DispatchQueue.main.async {
+                        let originalTaskEntry = DayEntry(text: "✅ " + newGoal, isPriority: false)
+                        self.goals.append(originalTaskEntry)
+                        self.goals.append(contentsOf: newTasks)
+                        self.newGoal = ""
+                        self.saveGoals()
+                        self.isGeneratingTask = false
+                    }
                 }
-                
-                // Add the original task and the new sub-tasks to the list.
-                let originalTaskEntry = DayEntry(text: "✅ " + newGoal, isPriority: false)
-                goals.append(originalTaskEntry)
-                goals.append(contentsOf: newTasks)
-                
-                newGoal = "" // Clear the input field.
-                saveGoals() // Save the updated list.
+            } else {
+                handleError(message: "Could not parse a valid response from the AI.")
             }
-        
         } catch {
-            print("Erorr during API call: \(error.localizedDescription)")
-            let originalTaskEntry = DayEntry(text: "✅ " + newGoal, isPriority: false)
-            goals.append(originalTaskEntry)
-            newGoal = ""
-            saveGoals()
+            handleError(message: "API call failed: \(error.localizedDescription)")
         }
-        isGeneratingTask = false
+    }
+    
+    private func handleError(message: String){
+        print("Error: \(message)")
+        DispatchQueue.main.async{
+            self.errorMessage = message
+            self.showingErrorAlert = true
+            self.isGeneratingTask = false
+        }
     }
     
     private func loadGoals(){
@@ -201,6 +248,8 @@ struct DayDetailView: View {
 
 struct DayDetailView_Previews: PreviewProvider {
     static var previews: some View {
-        DayDetailView(selectedDay: 15, onGoalsUpdated: {})
+        NavigationStack {
+            DayDetailView(selectedDay: 15, onGoalsUpdated: {})
+        }
     }
 }
