@@ -26,7 +26,7 @@ struct MainTabView: View{
                     }
 
                 // Tab 3: The To-Do Inbox
-                Text("To-Do Inbox (Placeholder)")
+                InboxView()
                     .tabItem {
                         Image(systemName: "tray.fill")
                         Text("Inbox")
