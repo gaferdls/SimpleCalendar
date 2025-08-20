@@ -43,6 +43,11 @@ struct ContentView: View {
                         }
                         .padding([.horizontal, .top])
                         
+                        // MARK: - Stats View
+                        
+                        StatsView(totalCompleted: viewModel.totalTasksCompleted, currentStreak: viewModel.streakData.currentStreak)
+                                .padding(.horizontal)
+                        
                         // MARK: - Progress Bar
                         VStack(alignment: .leading) {
                             Text("Daily Progress")
@@ -142,9 +147,6 @@ struct ContentView: View {
                         .foregroundColor(.white)
                         .clipShape(Circle())
                         .shadow(radius: 4, x: 0, y: 4)
-                }
-                .sheet(isPresented: $showingBrainDumpSheet){
-                    BrainDumpEntryView()
                 }
             }
         }

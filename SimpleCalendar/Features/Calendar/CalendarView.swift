@@ -38,8 +38,6 @@ struct CalendarView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    StatsView(totalCompleted: viewModel.totalTasksCompleted, currentStreak: viewModel.streakData.currentStreak)
-                        .padding(.bottom)
                     
                     // MARK: Calendar Grid
                     VStack(alignment: .leading) {
