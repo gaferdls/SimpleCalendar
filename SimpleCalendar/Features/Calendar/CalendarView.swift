@@ -33,6 +33,12 @@ struct CalendarView: View {
         formatter.dateFormat = "MMMM yyyy"
         return formatter.string(from: date)
     }
+
+    private func changeMonth(by amount: Int) {
+        if let newDate = calendar.date(byAdding: .month, value: amount, to: currentDate) {
+            currentDate = newDate
+        }
+    }
     
     var body: some View {
         NavigationStack {
@@ -41,14 +47,31 @@ struct CalendarView: View {
                     
                     // MARK: Calendar Grid
                     VStack(alignment: .leading) {
-                        Text(headerText(for: currentDate))
-                            .font(.title)
-                            .fontWeight(.bold)
-                            .padding(.horizontal)
+                        HStack {
+                            Text(headerText(for: currentDate))
+                                .font(.title)
+                                .fontWeight(.bold)
+
+                            Spacer()
+
+                            Button(action: {
+                                changeMonth(by: -1)
+                            }) {
+                                Image(systemName: "chevron.left")
+                                    .font(.title2)
+                            }
+
+                            Button(action: {
+                                changeMonth(by: 1)
+                            }) {
+                                Image(systemName: "chevron.right")
+                                    .font(.title2)
+                            }
+                        }
+                        .padding(.horizontal)
                         
                         HStack(spacing: 0) {
-                            let weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-                            ForEach(weekdays, id: \.self) { day in
+                            ForEach(Calendar.current.shortWeekdaySymbols, id: \.self) { day in
                                 Text(day)
                                     .font(.footnote)
                                     .frame(maxWidth: .infinity)
@@ -122,10 +145,9 @@ struct CalendarView: View {
     }
     
     private func dateKey(for day: Int) -> String {
-        let today = Date()
-        var components = calendar.dateComponents([.year, .month], from: today)
+        var components = calendar.dateComponents([.year, .month], from: currentDate)
         components.day = day
-        let selectedDate = Calendar.current.date(from: components) ?? today
+        let selectedDate = Calendar.current.date(from: components) ?? currentDate
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: selectedDate)
