@@ -51,14 +51,14 @@ struct BrainDumpView: View {
                     EditButton()
                 }
             }
-            .onChange(of: taskToDecompose) { _, newValue in
+            .onChange(of: taskToDecompose, perform: { newValue in
                 if let task = newValue {
                     Task {
                         await viewModel.decomposeTask(task)
                         taskToDecompose = nil
                     }
                 }
-            }
+            })
             .alert("Error", isPresented: .constant(viewModel.generationError != nil), actions: {
                 Button("OK") { viewModel.generationError = nil }
             }, message: {

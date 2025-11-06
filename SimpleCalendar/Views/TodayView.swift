@@ -125,6 +125,9 @@ struct TodayView: View {
                         .shadow(radius: 4, x: 0, y: 4)
                 }
             }
+            .sheet(isPresented: $showingBrainDumpSheet) {
+                BrainDumpView()
+            }
         }
     }
 }
