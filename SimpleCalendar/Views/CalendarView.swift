@@ -12,9 +12,6 @@ struct CalendarView: View {
     
     @EnvironmentObject var viewModel: AppViewModel
     
-    // UI Interaction State
-    @State private var currentDate = Date()
-    
     private var calendar: Calendar {
         Calendar.current
     }
@@ -35,8 +32,8 @@ struct CalendarView: View {
     }
 
     private func changeMonth(by amount: Int) {
-        if let newDate = calendar.date(byAdding: .month, value: amount, to: currentDate) {
-            currentDate = newDate
+        if let newDate = calendar.date(byAdding: .month, value: amount, to: viewModel.currentMonth) {
+            viewModel.currentMonth = newDate
         }
     }
     
@@ -48,7 +45,7 @@ struct CalendarView: View {
                     // MARK: Calendar Grid
                     VStack(alignment: .leading) {
                         HStack {
-                            Text(headerText(for: currentDate))
+                            Text(headerText(for: viewModel.currentMonth))
                                 .font(.title)
                                 .fontWeight(.bold)
 
@@ -80,8 +77,8 @@ struct CalendarView: View {
                         .padding(.horizontal)
                         
                         Grid(horizontalSpacing: 0, verticalSpacing: 10) {
-                            let leadingBlanks = firstDayOfMonth(in: currentDate) - 1
-                            let totalDays = numberOfDays(in: currentDate)
+                            let leadingBlanks = firstDayOfMonth(in: viewModel.currentMonth) - 1
+                            let totalDays = numberOfDays(in: viewModel.currentMonth)
                             let totalCells = leadingBlanks + totalDays
                             let totalRows = (totalCells + 6 ) / 7
                             
@@ -139,53 +136,12 @@ struct CalendarView: View {
     
     func isToday(day: Int) -> Bool {
         let components = calendar.dateComponents([.year, .month, .day], from: Date())
-        let currentMonthComponents = calendar.dateComponents([.year, .month], from: currentDate)
+        let currentMonthComponents = calendar.dateComponents([.year, .month], from: viewModel.currentMonth)
         
         return components.day == day && components.month == currentMonthComponents.month && components.year == currentMonthComponents.year
     }
     
-    private func dateKey(for day: Int) -> String {
-        var components = calendar.dateComponents([.year, .month], from: currentDate)
-        components.day = day
-        let selectedDate = Calendar.current.date(from: components) ?? currentDate
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: selectedDate)
-    }
-    
     private func hasGoal (for day: Int) -> Bool {
-        let key = dateKey(for: day)
-        return !(viewModel.allGoals[key] ?? []).isEmpty
-    }
-}
-
-
-// MARK: - Helper Views for CalendarView
-
-struct StatsView: View {
-    let totalCompleted: Int
-    let currentStreak: Int
-    
-    var body: some View {
-        HStack {
-            Spacer()
-            VStack {
-                Text("\(totalCompleted)")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                Text("Completed")
-                    .font(.caption)
-            }
-            Spacer()
-            VStack {
-                Text("\(currentStreak)")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                Text("Day Streak 🔥")
-                    .font(.caption)
-            }
-            Spacer()
-        }
-        .padding(.horizontal)
+        return !viewModel.tasksForDay(day).isEmpty
     }
 }

@@ -1,29 +1,26 @@
-//
-//  AppViewModel.swift
-//  SimpleCalendar
-//
-//  Created by Geanpierre Fernandez on 8/14/25.
-//
-
 import Foundation
 import SwiftUI
-
-// A simple Decodable struct to match the JSON response we requested
-fileprivate struct AIResponse: Decodable {
-    let subtasks: [String]
-}
+import SwiftData
 
 class AppViewModel: ObservableObject {
     
     // MARK: - Published Properties
-    @Published var allGoals: [String: [DayEntry]] = [:]
-    @Published var brainDumpTasks: [DayEntry] = []
-    @Published var todaysFocusTasks: [DayEntry] = []
+    @Published var brainDumpTasks: [Task] = []
+    @Published var todaysFocusTasks: [Task] = []
+    @Published var currentMonth: Date = Date()
     
     // Gamification Stats
-    @Published var totalTasksCompleted: Int = 0
-    @Published var totalFocusSessions: Int = 0
-    @Published var streakData = StreakData()
+    @AppStorage("totalTasksCompleted") var totalTasksCompleted: Int = 0
+    @AppStorage("totalFocusSessions") var totalFocusSessions: Int = 0
+    @AppStorage("streakData") var streakDataEncoded: Data = Data()
+
+    @Published var streakData = StreakData() {
+        didSet {
+            if let encoded = try? JSONEncoder().encode(streakData) {
+                streakDataEncoded = encoded
+            }
+        }
+    }
     
     // AI State
     @Published var isGeneratingSubtasks: Bool = false
@@ -33,80 +30,85 @@ class AppViewModel: ObservableObject {
         Calendar.current
     }
     
-    init(){
+    private var persistenceManager: PersistenceManager
+
+    init(persistenceManager: PersistenceManager = .shared){
+        self.persistenceManager = persistenceManager
         loadData()
         updateStreakOnLoad()
+
+        if let decoded = try? JSONDecoder().decode(StreakData.self, from: streakDataEncoded) {
+            self.streakData = decoded
+        }
     }
     
     // MARK: - Data Persistence
     
     func loadData() {
-        let loadedData = DataManager.shared.load()
-        self.allGoals = loadedData.goalsByDate
-        self.brainDumpTasks = loadedData.brainDump
-        self.todaysFocusTasks = loadedData.todaysFocus
-        self.totalTasksCompleted = loadedData.totalTasksCompleted
-        self.totalFocusSessions = loadedData.totalFocusSessions
-        self.streakData = loadedData.streakData
-    }
-    
-    func saveData() {
-        DataManager.shared.save(
-            goalsByDate: allGoals,
-            brainDump: brainDumpTasks,
-            todaysFocus: todaysFocusTasks,
-            totalTasksCompleted: totalTasksCompleted,
-            totalFocusSessions: totalFocusSessions,
-            streakData: streakData
-        )
+        let allTasks = persistenceManager.fetchTasks()
+        self.brainDumpTasks = allTasks.filter { $0.isBrainDump }
+        self.todaysFocusTasks = allTasks.filter { !$0.isBrainDump }
     }
     
     // MARK: - Task Management
     
-    func completeTask(_ task: DayEntry) {
+    func completeTask(_ task: Task) {
         if let index = todaysFocusTasks.firstIndex(where: { $0.id == task.id}){
             guard !todaysFocusTasks[index].isCompleted else { return }
             todaysFocusTasks[index].isCompleted = true
             totalTasksCompleted += 1
             updateStreak()
-            saveData()
         }
     }
     
     func incrementFocusSessions(){
         totalFocusSessions += 1
-        saveData()	
     }
     
-    func moveTaskToToday(task: DayEntry) {
-        todaysFocusTasks.append(task)
+    func moveTaskToToday(task: Task) {
+        task.isBrainDump = false
         brainDumpTasks.removeAll { $0.id == task.id }
-        saveData()
+        todaysFocusTasks.append(task)
     }
         
-    func addBrainDumpTask(_ text: String) {
+    func addBrainDumpTask(text: String) {
         if !text.isEmpty {
-            let newEntry = DayEntry(text: text)
-            brainDumpTasks.append(newEntry)
-            saveData()
+            let newTask = persistenceManager.addTask(text: text, isBrainDump: true)
+            brainDumpTasks.append(newTask)
         }
+    }
+
+    func addTask(text: String, for day: Int) {
+        if !text.isEmpty {
+            let newTask = persistenceManager.addTask(text: text, for: day, in: currentMonth)
+            todaysFocusTasks.append(newTask)
+        }
+    }
+
+    func tasksForDay(_ day: Int) -> [Task] {
+        return persistenceManager.fetchTasks(for: day, in: currentMonth)
     }
         
     func deleteBrainDumpTask(at offsets: IndexSet) {
+        for index in offsets {
+            let task = brainDumpTasks[index]
+            persistenceManager.deleteTask(task)
+        }
         brainDumpTasks.remove(atOffsets: offsets)
-        saveData()
     }
         
     func deleteTodaysFocusTask(at offsets: IndexSet) {
+        for index in offsets {
+            let task = todaysFocusTasks[index]
+            persistenceManager.deleteTask(task)
+        }
         todaysFocusTasks.remove(atOffsets: offsets)
-        saveData()
     }
     
-    func updateTaskTime(for task: DayEntry, newDate: Date){
+    func updateTaskTime(for task: Task, newDate: Date){
         if let index = todaysFocusTasks.firstIndex(where: { $0.id == task.id}){
             todaysFocusTasks[index].startTime = newDate
             todaysFocusTasks.sort { ($0.startTime ?? .distantFuture) < ($1.startTime ?? .distantFuture) }
-            saveData()
         }
     }
     
@@ -137,13 +139,12 @@ class AppViewModel: ObservableObject {
         
         if !calendar.isDateInToday(lastDate) && !calendar.isDateInYesterday(lastDate) {
             streakData.currentStreak = 0
-            saveData()
         }
     }
     
     // MARK: - AI Task Decomposition
     
-    func decomposeTask(_ task: DayEntry) async {
+    func decomposeTask(_ task: Task) async {
         DispatchQueue.main.async {
             self.isGeneratingSubtasks = true
             self.generationError = nil
@@ -185,22 +186,17 @@ class AppViewModel: ObservableObject {
                 
                 if let jsonData = text.data(using: .utf8) {
                     let decodedResponse = try JSONDecoder().decode(AIResponse.self, from: jsonData)
-                    let newTasks = decodedResponse.subtasks.map { DayEntry(text: "📝 " + $0) }
                     
                     DispatchQueue.main.async {
                         // Mark the original task as complete and add the new subtasks to the inbox
-                        if let index = self.brainDumpTasks.firstIndex(where: { $0.id == task.id }) {
-                            self.brainDumpTasks.remove(at: index)
-                            self.brainDumpTasks.insert(contentsOf: newTasks, at: index)
-                        } else {
-                            // Fallback if the original task wasn't found
-                            self.brainDumpTasks.append(contentsOf: newTasks)
+                        self.persistenceManager.deleteTask(task)
+                        self.brainDumpTasks.removeAll { $0.id == task.id }
+                        for subtask in decodedResponse.subtasks {
+                            let newTask = self.persistenceManager.addTask(text: "📝 " + subtask, isBrainDump: true)
+                            self.brainDumpTasks.append(newTask)
                         }
-                        
-                        let originalTaskEntry = DayEntry(text: "✅ " + task.text, isCompleted: true)
-                        self.todaysFocusTasks.append(originalTaskEntry)
-                        
-                        self.saveData()
+                        let completedTask = self.persistenceManager.addTask(text: "✅ " + task.text, isBrainDump: false)
+                        self.todaysFocusTasks.append(completedTask)
                         self.isGeneratingSubtasks = false
                     }
                 }
@@ -219,4 +215,8 @@ class AppViewModel: ObservableObject {
             self.isGeneratingSubtasks = false
         }
     }
+}
+
+fileprivate struct AIResponse: Decodable {
+    let subtasks: [String]
 }
