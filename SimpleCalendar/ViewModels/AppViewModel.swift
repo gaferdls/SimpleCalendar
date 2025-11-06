@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import SwiftData
 
+@MainActor
 class AppViewModel: ObservableObject {
     
     // MARK: - Published Properties
